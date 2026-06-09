@@ -12,7 +12,7 @@ app.get('/priority-notifications', async (req, res) => {
   const token = process.env.ACCESS_TOKEN;
 
   if (!token || token === "PASTE_YOUR_ACCESS_TOKEN_HERE") {
-    const errorMsg = "ACCESS_TOKEN is not configured. Please update the .env file.";
+    const errorMsg = "ACCESS_TOKEN is not configured. Please paste again the new token";
     console.error(errorMsg);
     await Log("backend", "error", "handler", errorMsg);
     return res.status(401).json({

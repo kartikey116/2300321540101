@@ -9,10 +9,6 @@ For the campus notification platform, we need to design a solid API contract to 
 * **Headers:**
   * `Authorization: Bearer <token>`
   * `Content-Type: application/json`
-* **Query Parameters:**
-  * `status`: (Optional) `unread` or `read`
-  * `limit`: (Optional) default 20
-  * `page`: (Optional) default 1
 * **Response (Status 200 OK):**
   ```json
   {
@@ -209,35 +205,41 @@ To make the process fast and reliable, we should decouple the actions using a **
 
 ## Revised Pseudocode
 
-```python
-# Publisher (Run on API endpoint)
-function notify_all(student_ids, message):
-    notification_id = save_notification_to_db(message)
+```javascript
+// Publisher (Run on API endpoint)
+async function notifyAll(studentIds, message) {
+    const notificationId = await saveNotificationToDb(message);
     
-    # Batch publish jobs to the queue to avoid looping in the main thread
-    jobs = []
-    for student_id in student_ids:
-        jobs.append({
-            "student_id": student_id,
-            "notification_id": notification_id,
-            "message": message
-        })
-    publish_to_queue("notification_tasks", jobs)
+    // Batch jobs to publish to the queue to avoid blocking
+    const jobs = studentIds.map(studentId => ({
+        studentId,
+        notificationId,
+        message
+    }));
+    
+    await publishToQueue("notification_tasks", jobs);
+}
 
-# Worker (Runs asynchronously on background processes)
-function process_notification_job(job):
-    try:
-        # 1. Update student's feed in DB (very fast local write)
-        save_student_notification_to_db(job.student_id, job.notification_id)
+// Worker (Runs asynchronously on background processes)
+async function processNotificationJob(job) {
+    try {
+        // 1. Update student's feed in DB (fast local write)
+        await saveStudentNotificationToDb(job.studentId, job.notificationId);
         
-        # 2. Push real-time alert (non-blocking)
-        push_to_app(job.student_id, job.message)
+        // 2. Push real-time alert (non-blocking)
+        await pushToApp(job.studentId, job.message);
         
-        # 3. Send email via queue or separate worker
-        send_email(job.student_id, job.message)
-    except EmailSendError as e:
-        # Re-queue the email task specifically with backoff, don't fail the whole job
-        retry_job(job, delay=30)
+        // 3. Send email asynchronously
+        await sendEmail(job.studentId, job.message);
+    } catch (error) {
+        // Re-queue the email task specifically with backoff
+        if (error.name === "EmailSendError") {
+            await retryJob(job, 30); // retry in 30 seconds
+        } else {
+            throw error;
+        }
+    }
+}
 ```
 
 ---
@@ -254,5 +256,3 @@ To implement the **Priority Inbox**, we score and sort notifications based on we
   score = (weight * 10000000000) + (timestamp_epoch_seconds)
   ```
   This creates a clear hierarchy: Placements always rank above Results, and Results above Events. Within the same type, notifications are sorted strictly by recency (newest first).
-
-*(Note: The actual implementation is developed in the microservice located in the `notification_app_be` directory).*
